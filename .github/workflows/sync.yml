@@ -1,0 +1,81 @@
+name: Sync Latest Memos to HuggingFace Space
+
+on:
+  schedule:
+    # 每天检查一次新版本 (UTC 2:00 = 北京时间 10:00)
+    - cron: '0 2 * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  check-and-sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Get latest Memos release version
+        id: memos_version
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/usememos/memos/releases/latest | jq -r '.tag_name')
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest Memos version: $LATEST"
+
+      - name: Get current version in Space
+        id: current_version
+        run: |
+          # 读取本地记录的版本号
+          if [ -f version.txt ]; then
+            CURRENT=$(cat version.txt)
+          else
+            CURRENT="none"
+          fi
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT"
+
+      - name: Check if update needed
+        id: need_update
+        run: |
+          if [ "${{ steps.memos_version.outputs.latest }}" != "${{ steps.current_version.outputs.current }}" ]; then
+            echo "update=true" >> $GITHUB_OUTPUT
+            echo "Update needed: ${{ steps.current_version.outputs.current }} -> ${{ steps.memos_version.outputs.latest }}"
+          else
+            echo "update=false" >> $GITHUB_OUTPUT
+            echo "Already up to date"
+          fi
+
+      - name: Update Dockerfile with new version
+        if: steps.need_update.outputs.update == 'true'
+        run: |
+          VERSION=${{ steps.memos_version.outputs.latest }}
+          # 去掉 'v' 前缀
+          VERSION_NUM=${VERSION#v}
+          # 更新 Dockerfile 使用指定版本而非 stable
+          sed -i "s|FROM neosmemo/memos:.*|FROM neosmemo/memos:${VERSION_NUM}|" Dockerfile
+          # 记录当前版本
+          echo "$VERSION" > version.txt
+          echo "Updated Dockerfile to use memos:${VERSION_NUM}"
+
+      - name: Push to HuggingFace Space
+        if: steps.need_update.outputs.update == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ secrets.HF_SPACE }}  # 格式: username/space-name
+        run: |
+          # 配置 git
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+
+          # 提交版本更新
+          git add Dockerfile version.txt
+          git commit -m "chore: update memos to ${{ steps.memos_version.outputs.latest }}"
+
+          # 推送到 HuggingFace Space (触发重新部署)
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}
+          git push hf main
+
+          echo "✅ Pushed to HuggingFace Space: $HF_SPACE"
+
+      - name: No update needed
+        if: steps.need_update.outputs.update == 'false'
+        run: echo "✅ Memos is already at latest version ${{ steps.memos_version.outputs.latest }}"
