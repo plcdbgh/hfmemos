@@ -9,6 +9,15 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest Memos version
+        id: version
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/usememos/memos/releases/latest | jq -r '.tag_name')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -20,3 +29,18 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository_owner }}/memos:latest"
           docker tag neosmemo/memos:stable $IMAGE
           docker push $IMAGE
+
+      - name: Update README
+        run: |
+          DATE=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/.*Last sync.*/- Last sync: ${DATE} (CST)/" README.md
+          sed -i "s/.*Version.*/- Version: ${VERSION}/" README.md
+
+      - name: Commit README
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add README.md
+          git commit -m "chore: sync memos ${{ steps.version.outputs.version }}"
+          git push
