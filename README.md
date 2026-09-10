@@ -10,5 +10,5 @@ ghcr.io/你的用户名/memos:latest
 
 ## 同步状态
 
-- Last sync: 2026-09-09 14:50:07 (CST)
+- Last sync: 2026-09-10 14:45:48 (CST)
 - Version: v0.30.0
